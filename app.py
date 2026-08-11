@@ -1,3 +1,6 @@
+# =====================================================================
+# APPLICATION : PORTAIL CENTRAL HUB (portail-gnc)
+# =====================================================================
 import cadre_entreprise.auth as auth
 import cadre_entreprise.ui as ui
 from cadre_entreprise.database import supabase
@@ -5,245 +8,211 @@ import streamlit as st
 
 # 1. Configuration de la page Streamlit
 st.set_page_config(
-    page_title="Portail Applicatif GNC", layout="wide", page_icon="🚀"
+    page_title="Portail Central HUB - GNC",
+    layout="wide",
+    page_icon="🏛️",
 )
 
-# 2. Contrôle d'Accès & Connexion Standardisée (via SDK)
+# 2. Vérification de la connexion via le SDK Centralisé
 if not auth.est_connecte():
-  ui.afficher_ecran_login(
-      nom_application="Portail Central GNC", icone="🚀"
-  )
+  ui.afficher_ecran_login("Portail Central HUB", "🏛️")
   st.stop()
 
-# 3. Barre Latérale Standardisée (Profil, Rôle & Déconnexion via SDK)
+# 3. Barre latérale de profil standardisée
 ui.afficher_sidebar_standard()
 
 # =====================================================================
-# ÉCRAN PRINCIPAL : ESPACE CONNECTÉ (PORTAIL + MODULE ADMIN)
+# 4. PROFIL UTILISATEUR & DROITS D'ADMINISTRATION
 # =====================================================================
 user = auth.get_user_info()
-user_login = user.get("login")
+user_login = str(user.get("login", "")).lower().strip()
 user_role = str(user.get("role", "")).upper().strip()
 
-# Menu interne de navigation dans la sidebar
-options_menu = ["🌐 Mes Applications"]
-if user_role == "ADMIN":
-  options_menu.append("⚙️ Administration & Droits")
+# Définition des privilèges Administrateur (Role ADMIN ou logins spécifiques)
+est_admin = (user_role == "ADMIN") or (user_login in ["admin", "eric.kuter"])
 
-choix_menu = st.sidebar.radio("Navigation", options_menu)
+# =====================================================================
+# 5. EN-TÊTE ET ONGLETS DE NAVIGATION
+# =====================================================================
+st.title("🏛️ Portail Central HUB – GNC")
+st.caption(
+    f"Connecté en tant que : **{user.get('nom')}** | Service :"
+    f" **{user.get('service')}**"
+)
+st.divider()
 
-# ---------------------------------------------------------------------
-# OPTION 1 : CATALOGUE DES APPLICATIONS (Visible selon les droits)
-# ---------------------------------------------------------------------
-if choix_menu == "🌐 Mes Applications":
-  st.title("🌐 Vos Applications Disponibles")
-  st.write("Sélectionnez un outil pour l'ouvrir dans un nouvel onglet :")
-  st.divider()
+if est_admin:
+  tab_apps, tab_admin = st.tabs(
+      ["🚀 Applications Métiers", "⚙️ Administration des Comptes & Droits"]
+  )
+else:
+  tab_apps = st.container()
+  tab_admin = None
 
-  try:
-    res_apps = (
-        supabase.table("Application").select("*").eq("actif", True).execute()
-    )
-    toutes_les_apps = res_apps.data or []
+# =====================================================================
+# ONGLET 1 : CATALOGUE DES APPLICATIONS
+# =====================================================================
+with tab_apps:
+  st.subheader("📱 Vos Applications Disponibles")
 
-    if user_role == "ADMIN":
-      apps_autorisees = toutes_les_apps
-    else:
-      res_aut = (
-          supabase.table("Autorisation")
-          .select("code_app")
-          .eq("login", user_login)
-          .execute()
+  col1, col2 = st.columns(2)
+
+  with col1:
+    with st.container(border=True):
+      st.markdown("### 💰 Gestion Budgétaire")
+      st.caption(
+          "Préparation et suivi budgétaire, gestion des devis et exports PDF."
       )
-      codes_autorises = [a["code_app"] for a in (res_aut.data or [])]
-      apps_autorisees = [
-          app for app in toutes_les_apps if app["code_app"] in codes_autorises
-      ]
-
-    if apps_autorisees:
-      cols = st.columns(3)
-      for idx, app in enumerate(apps_autorisees):
-        with cols[idx % 3]:
-          with st.container(border=True):
-            st.subheader(f"{app.get('icone', '📱')} {app.get('nom')}")
-            st.caption(
-                app.get("description", "Aucune description renseignée.")
-            )
-            st.write("")
-            st.link_button(
-                "Accéder à l'application ↗️",
-                app.get("url", "#"),
-                use_container_width=True,
-            )
-    else:
-      st.info("🔒 Vous ne disposez d'accès à aucune application actuellement.")
-
-  except Exception as err:
-    st.error(f"Erreur lors du chargement des droits applicatifs : {err}")
-
-# ---------------------------------------------------------------------
-# OPTION 2 : MODULE ADMIN (Réservé aux Rôles ADMIN)
-# ---------------------------------------------------------------------
-elif choix_menu == "⚙️ Administration & Droits":
-  st.title("⚙️ Administration Centralisée du Portail")
-  st.write("Gérez les comptes utilisateurs et attribuez les accès applicatifs.")
-  st.divider()
-
-  tab_users, tab_droits, tab_apps = st.tabs([
-      "👤 Créer un Utilisateur",
-      "🔑 Affectation des Droits",
-      "📱 Catalogue d'Apps",
-  ])
-
-  # --- TAB 1 : CRÉATION D'UTILISATEUR ---
-  with tab_users:
-    st.subheader("➕ Ajouter un nouvel utilisateur")
-    with st.form("form_add_user"):
-      col_u1, col_u2 = st.columns(2)
-      with col_u1:
-        new_nom = st.text_input("Nom Complet (ex: Jean DUPONT)")
-        new_login = st.text_input("Identifiant / Login").lower().strip()
-        new_mdp = st.text_input("Mot de passe temporaire", type="password")
-      with col_u2:
-        new_service = st.text_input("Service (ex: INFORMATIQUE)")
-        new_role = st.selectbox("Rôle", ["USER", "ADMIN"], index=0)
-
-      btn_create_user = st.form_submit_button(
-          "Créer le compte", use_container_width=True
+      st.link_button(
+          "Accéder au Budget ↗️",
+          "https://gestion-budget.streamlit.app",
+          use_container_width=True,
       )
 
-    if btn_create_user:
-      if not new_login or not new_mdp or not new_nom:
-        st.warning("⚠️ Les champs Nom, Login et Mot de passe sont requis.")
-      else:
-        try:
-          check = (
-              supabase.table("Utilisateur")
-              .select("login")
-              .eq("login", new_login)
-              .execute()
+  with col2:
+    with st.container(border=True):
+      st.markdown("### 🔥 Sécurité Incendie")
+      st.caption(
+          "Tableau du jour de l'équipe d'évacuation, consignes et main"
+          " courante PC Sécurité."
+      )
+      # URL Streamlit Cloud définitive du module Sécurité Incendie
+      st.link_button(
+          "Accéder au Poste Sécurité ↗️",
+          "https://securite-incendie.streamlit.app",
+          use_container_width=True,
+      )
+
+# =====================================================================
+# ONGLET 2 : ADMINISTRATION DES COMPTES (RÉSERVÉ ADMIN / ERIC.KUTER)
+# =====================================================================
+if est_admin and tab_admin:
+  with tab_admin:
+    st.subheader("👥 Gestion des Comptes Utilisateurs (Table `Utilisateur`)")
+
+    # --- SECTION A : CRÉATION ET RÉINITIALISATION DE COMPTE ---
+    with st.expander("➕ Créer ou Réinitialiser un Compte", expanded=False):
+      with st.form("form_gestion_compte_portail", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+          f_login = st.text_input("Identifiant / Login").lower().strip()
+          f_mdp = st.text_input("Nouveau Mot de Passe", type="password")
+        with c2:
+          f_nom = st.text_input("Nom Complet / Libellé")
+          f_role = st.selectbox("Rôle", ["USER", "ADMIN"])
+        with c3:
+          f_service = st.text_input(
+              "Code Service (ex: CSPP - SURETE, SANL, TOUS)"
           )
-          if check.data:
-            st.error(f"❌ Le login '{new_login}' existe déjà !")
-          else:
-            # Utilisation de la fonction de hachage du SDK
-            mdp_hache = auth.hacher_mot_de_passe(new_mdp)
-            supabase.table("Utilisateur").insert({
-                "login": new_login,
-                "nom": new_nom,
-                "mdp": mdp_hache,
-                "role": new_role,
-                "service": new_service,
-            }).execute()
-            st.success(f"✅ Compte '{new_login}' créé avec succès !")
-        except Exception as e:
-          st.error(f"Erreur lors de la création : {e}")
 
-  # --- TAB 2 : AFFECTATION DES DROITS ---
-  with tab_droits:
-    st.subheader("🔑 Matrice des Autorisations Applicatives")
+        btn_valider_compte = st.form_submit_button(
+            "💾 Enregistrer / Mettre à jour le Compte",
+            use_container_width=True,
+        )
 
-    res_users = supabase.table("Utilisateur").select("login, nom, role").execute()
-    liste_users = res_users.data or []
+      if btn_valider_compte:
+        if not f_login or not f_mdp or not f_nom:
+          st.warning("⚠️ Le Login, le Mot de Passe et le Nom sont requis.")
+        else:
+          # Hachage sécurisé Bcrypt via le SDK
+          hash_mdp = auth.hacher_mot_de_passe(f_mdp)
+
+          # Vérification de l'existence du compte en BDD
+          try:
+            res_exist = (
+                supabase.table("Utilisateur")
+                .select("id")
+                .eq("login", f_login)
+                .execute()
+            )
+            existe = bool(res_exist.data and len(res_exist.data) > 0)
+
+            donnees_compte = {
+                "login": f_login,
+                "mdp": hash_mdp,
+                "nom": f_nom,
+                "role": f_role,
+                "service": f_service or "NON DÉFINI",
+            }
+
+            if existe:
+              # Mise à jour
+              supabase.table("Utilisateur").update(donnees_compte).eq(
+                  "login", f_login
+              ).execute()
+              st.success(
+                  f"✅ Compte '{f_login}' réinitialisé avec succès !"
+              )
+            else:
+              # Insertion
+              supabase.table("Utilisateur").insert(donnees_compte).execute()
+              st.success(f"✅ Nouveau compte '{f_login}' créé avec succès !")
+
+            st.rerun()
+          except Exception as err:
+            st.error(f"❌ Erreur de sauvegarde Supabase : {err}")
+
+    st.divider()
+
+    # --- SECTION B : ÉDITEUR INTERACTIF DES COMPTES EXISTANTS ---
+    st.markdown("##### 📋 Liste Générale des Comptes")
+    try:
+      res_users = (
+          supabase.table("Utilisateur").select("*").order("login").execute()
+      )
+      liste_users = res_users.data or []
+    except Exception as e:
+      st.error(f"Erreur de lecture Supabase : {e}")
+      liste_users = []
 
     if liste_users:
-      user_target_login = st.selectbox(
-          "Sélectionnez un utilisateur à paramétrer :",
-          options=[u["login"] for u in liste_users],
-          format_func=lambda x: (
-              f"{x} - {next((u['nom'] for u in liste_users if u['login'] == x), '')}"
-          ),
-      )
-
-      droits_actuels_res = (
-          supabase.table("Autorisation")
-          .select("code_app")
-          .eq("login", user_target_login)
-          .execute()
-      )
-      codes_droits_actuels = [
-          d["code_app"] for d in (droits_actuels_res.data or [])
-      ]
-
-      all_apps_res = supabase.table("Application").select("*").execute()
-      all_apps = all_apps_res.data or []
-
-      st.write(
-          f"Cochez les applications autorisées pour **{user_target_login}** :"
-      )
-
-      with st.form("form_matrice_droits"):
-        nouveaux_droits = {}
-        for app in all_apps:
-          c_code = app["code_app"]
-          est_oche = c_code in codes_droits_actuels
-          nouveaux_droits[c_code] = st.checkbox(
-              f"{app.get('icone', '')} **{app['nom']}** (`{c_code}`)",
-              value=est_oche,
-          )
-
-        btn_save_droits = st.form_submit_button(
-            "Enregistrer les autorisations", use_container_width=True
+      with st.form("form_editeur_liste_utilisateurs"):
+        st.data_editor(
+            liste_users,
+            key="editeur_utilisateurs_portail",
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            column_order=["login", "nom", "role", "service"],
+            column_config={
+                "login": st.column_config.TextColumn(
+                    "Login (Identifiant)", disabled=True
+                ),
+                "nom": st.column_config.TextColumn(
+                    "Nom Complet", required=True
+                ),
+                "role": st.column_config.SelectboxColumn(
+                    "Rôle", options=["USER", "ADMIN"], required=True
+                ),
+                "service": st.column_config.TextColumn("Code Service"),
+            },
+        )
+        btn_sauver_table = st.form_submit_button(
+            "💾 Sauvegarder les modifications du Référentiel Utilisateurs",
+            use_container_width=True,
         )
 
-      if btn_save_droits:
+      if btn_sauver_table:
         try:
-          supabase.table("Autorisation").delete().eq(
-              "login", user_target_login
-          ).execute()
+          j_u = st.session_state["editeur_utilisateurs_portail"]
 
-          lignes_a_inserer = [
-              {"login": user_target_login, "code_app": code}
-              for code, coche in nouveaux_droits.items()
-              if coche
-          ]
+          # 1. Suppressions
+          if j_u.get("deleted_rows"):
+            for idx in j_u["deleted_rows"]:
+              log_del = liste_users[int(idx)]["login"]
+              supabase.table("Utilisateur").delete().eq(
+                  "login", log_del
+              ).execute()
 
-          if lignes_a_inserer:
-            supabase.table("Autorisation").insert(lignes_a_inserer).execute()
+          # 2. Modifications (Nom, Rôle, Service)
+          if j_u.get("edited_rows"):
+            for idx, modifs in j_u["edited_rows"].items():
+              log_mod = liste_users[int(idx)]["login"]
+              supabase.table("Utilisateur").update(modifs).eq(
+                  "login", log_mod
+              ).execute()
 
-          st.success("✅ Autorisations mises à jour instantanément !")
+          st.success("✅ Base Utilisateurs mise à jour !")
           st.rerun()
         except Exception as e:
-          st.error(f"Erreur lors de la mise à jour des droits : {e}")
-
-  # --- TAB 3 : GESTION DU CATALOGUE D'APPS ---
-  with tab_apps:
-    st.subheader("📱 Déclarer une nouvelle Application")
-    with st.form("form_add_app"):
-      col_a1, col_a2 = st.columns(2)
-      with col_a1:
-        app_code = (
-            st.text_input("Code Unique App (ex: RH_FLOTTE)")
-            .upper()
-            .strip()
-            .replace(" ", "_")
-        )
-        app_nom = st.text_input("Nom d'affichage (ex: Gestion Flotte)")
-        app_icone = st.text_input("Émoji / Icône", value="🚗")
-      with col_a2:
-        app_url = st.text_input(
-            "URL Streamlit Cloud", value="https://xxx.streamlit.app"
-        )
-        app_desc = st.text_area("Description courte")
-
-      btn_add_app = st.form_submit_button(
-          "Ajouter au Catalogue", use_container_width=True
-      )
-
-    if btn_add_app:
-      if not app_code or not app_nom or not app_url:
-        st.warning("⚠️ Code, Nom et URL sont obligatoires.")
-      else:
-        try:
-          supabase.table("Application").insert({
-              "code_app": app_code,
-              "nom": app_nom,
-              "icone": app_icone,
-              "url": app_url,
-              "description": app_desc,
-              "actif": True,
-          }).execute()
-          st.success(f"✅ Application '{app_nom}' ajoutée au catalogue !")
-          st.rerun()
-        except Exception as e:
-          st.error(f"Erreur lors de l'ajout : {e}")
+          st.error(f"Erreur de mise à jour : {e}")
