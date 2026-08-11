@@ -1,6 +1,7 @@
 # =====================================================================
 # APPLICATION : PORTAIL CENTRAL HUB (portail-gnc)
-# Correctif de la condition de filtrage des habilitations
+# Inclus : Catalogue dynamique, Matrice de droits, Gestion Utilisateurs,
+#          et Chiffrement / Modification de mot de passe autonome.
 # =====================================================================
 import cadre_entreprise.auth as auth
 import cadre_entreprise.ui as ui
@@ -23,14 +24,41 @@ if not auth.est_connecte():
 ui.afficher_sidebar_standard()
 
 # =====================================================================
-# 4. PROFIL UTILISATEUR & DROITS D'ADMINISTRATION
+# 4. PROFIL UTILISATEUR & MODIFICATION DE MOT DE PASSE (SIDEBAR)
 # =====================================================================
 user = auth.get_user_info()
 user_login = str(user.get("login", "")).lower().strip()
 user_role = str(user.get("role", "")).upper().strip()
 
-# Définition des privilèges Administrateur (Uniquement si rôle ADMIN ou comptes admins explicites)
+# Définition des privilèges Administrateur
 est_admin = (user_role == "ADMIN") or (user_login in ["admin", "eric.kuter"])
+
+# --- BLOC AUTONOME DE CHANGEMENT DE MOT DE PASSE EN SIDEBAR ---
+with st.sidebar:
+  st.divider()
+  with st.expander("🔑 Modifier mon mot de passe"):
+    with st.form("form_changement_mdp_utilisateur", clear_on_submit=True):
+      old_pass = st.text_input("Mot de passe actuel", type="password")
+      new_pass1 = st.text_input("Nouveau mot de passe", type="password")
+      new_pass2 = st.text_input("Confirmer le nouveau", type="password")
+
+      btn_valider_changement = st.form_submit_button(
+          "💾 Valider la modification", use_container_width=True
+      )
+
+    if btn_valider_changement:
+      if not old_pass or not new_pass1 or not new_pass2:
+        st.warning("⚠️ Tous les champs sont obligatoires.")
+      elif new_pass1 != new_pass2:
+        st.error("❌ Les deux nouveaux mots de passe ne correspondent pas.")
+      else:
+        succes, msg = auth.changer_mon_mot_de_passe(
+            user_login, old_pass, new_pass1
+        )
+        if succes:
+          st.success(msg)
+        else:
+          st.error(msg)
 
 # =====================================================================
 # 5. EN-TÊTE ET ONGLETS DE NAVIGATION
@@ -82,7 +110,7 @@ with tab_apps:
       )
       codes_autorises = [d["code_app"] for d in (res_droits.data or [])]
 
-      # 🎯 CORRECTION MAJEURE DU FILTRAGE PYTHON
+      # Filtrage du catalogue selon la table Autorisation
       apps_visibles = [
           a
           for a in toutes_les_apps
