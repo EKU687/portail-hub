@@ -1,8 +1,8 @@
 # =====================================================================
 # APPLICATION : PORTAIL CENTRAL HUB (portail-gnc)
-# Inclus : Catalogue dynamique, Matrice de droits, Gestion Utilisateurs,
-#          Chiffrement / Modification de mot de passe autonome,
-#          et REFERO (Gestion des référentiels MDM).
+# Inclus : Catalogue dynamique, Matrice de droits granulaire, 
+#           Gestion Utilisateurs, Chiffrement / Modification de MDP autonome,
+#           et REFERO (Gestion des référentiels MDM).
 # =====================================================================
 import cadre_entreprise.auth as auth
 import cadre_entreprise.ui as ui
@@ -181,36 +181,116 @@ if est_admin:
         except Exception as e:
             st.error(f"Erreur catalogue : {e}")
 
-    # --- ONGLET 3 : DROITS ---
+    # --- ONGLET 3 : DROITS GRANULAIRES (RÔLES & PÉRIMÈTRES) ---
     with tab_droits:
         st.subheader("🔑 Matrice des Droits (Table `Autorisation`)")
+        st.caption("Gestion granulaire des accès applicatifs, rôles et périmètres d'intervention.")
+        
         try:
             res_u = supabase.table("Utilisateur").select("login, nom").execute()
             users_list = {u["login"]: u["nom"] for u in (res_u.data or [])}
-            u_selectionne = st.selectbox("👤 Choisir un Utilisateur à habiliter :", options=list(users_list.keys()), format_func=lambda x: f"{x} ({users_list.get(x)})")
+            
+            u_selectionne = st.selectbox(
+                "👤 Choisir un Utilisateur à habiliter :", 
+                options=list(users_list.keys()), 
+                format_func=lambda x: f"{x} ({users_list.get(x)})"
+            )
 
             if u_selectionne:
-                res_d = supabase.table("Autorisation").select("code_app").eq("login", u_selectionne).execute()
-                apps_autorisees_actuelles = [d["code_app"] for d in (res_d.data or [])]
+                # Récupération de l'ensemble des autorisations enregistrées pour cet utilisateur
+                res_d = supabase.table("Autorisation").select("*").eq("login", u_selectionne).execute()
+                auths_utilisateur = {d["code_app"]: d for d in (res_d.data or [])}
 
-                with st.form("form_matrice_autorisation"):
-                    cochages = {}
+                st.markdown("---")
+                st.markdown(f"#### Configuration des accès pour **{users_list.get(u_selectionne)}** (`{u_selectionne}`)")
+
+                with st.form(f"form_matrice_autorisation_{u_selectionne}"):
+                    modifications = {}
+
                     for app in toutes_les_apps:
                         code_app = app.get("code_app") or app.get("code")
-                        if code_app:
-                            cochages[code_app] = st.checkbox(f"{app.get('icone', '📱')} **{app.get('nom')}** (`{code_app}`)", value=(code_app in apps_autorisees_actuelles))
+                        nom_app = app.get("nom")
+                        icone_app = app.get("icone", "📱")
 
-                    if st.form_submit_button("💾 Enregistrer les Autorisations", use_container_width=True):
-                        for code_app, coche in cochages.items():
-                            deja_en_base = code_app in apps_autorisees_actuelles
-                            if coche and not deja_en_base:
-                                supabase.table("Autorisation").insert({"login": u_selectionne, "code_app": code_app}).execute()
-                            elif not coche and deja_en_base:
-                                supabase.table("Autorisation").delete().eq("login", u_selectionne).eq("code_app", code_app).execute()
-                        st.success(f"✅ Autorisations mises à jour pour '{u_selectionne}' !")
-                        st.rerun()
+                        if code_app:
+                            # État actuel en base de données
+                            auth_actuelle = auths_utilisateur.get(code_app, {})
+                            est_autorise = code_app in auths_utilisateur
+                            role_actuel = auth_actuelle.get("role") or "UTILISATEUR"
+                            perim_actuel = auth_actuelle.get("perimetre") or "RESTREINT"
+
+                            st.markdown(f"##### {icone_app} **{nom_app}** (`{code_app}`)")
+                            col_chk, col_role, col_perim = st.columns([1.5, 2, 2])
+
+                            # 1. Case d'activation d'accès
+                            acces = col_chk.checkbox(
+                                "Autoriser l'accès", 
+                                value=est_autorise, 
+                                key=f"chk_{u_selectionne}_{code_app}"
+                            )
+
+                            # 2. Sélecteur de Rôle (Spécifique IDENTIS vs Standard)
+                            if code_app == "IDENTIS":
+                                liste_roles = ["GESTIONNAIRE_LOCAL", "ADMIN_NEDAP", "IMPRIMEUR", "SUPER_ADMIN"]
+                            else:
+                                liste_roles = ["UTILISATEUR", "ADMINISTRATEUR", "SUPER_ADMIN"]
+
+                            idx_role = liste_roles.index(role_actuel) if role_actuel in liste_roles else 0
+                            
+                            role = col_role.selectbox(
+                                "Rôle attribué",
+                                options=liste_roles,
+                                index=idx_role,
+                                disabled=not acces,
+                                key=f"role_{u_selectionne}_{code_app}"
+                            )
+
+                            # 3. Sélecteur de Périmètre
+                            liste_perim = ["RESTREINT", "TOUT"]
+                            idx_perim = liste_perim.index(perim_actuel) if perim_actuel in liste_perim else 0
+                            
+                            perim = col_perim.selectbox(
+                                "Périmètre de vision",
+                                options=liste_perim,
+                                index=idx_perim,
+                                disabled=not acces,
+                                help="RESTREINT = Sa direction uniquement | TOUT = Toutes les directions",
+                                key=f"perim_{u_selectionne}_{code_app}"
+                            )
+
+                            modifications[code_app] = {
+                                "acces": acces,
+                                "role": role,
+                                "perimetre": perim
+                            }
+                            st.divider()
+
+                    btn_sauver_droits = st.form_submit_button("💾 Enregistrer les Autorisations", type="primary", use_container_width=True)
+
+                if btn_sauver_droits:
+                    for code_app, data in modifications.items():
+                        if data["acces"]:
+                            # Upsert pour insérer ou mettre à jour la ligne avec le rôle et périmètre
+                            supabase.table("Autorisation").upsert({
+                                "login": u_selectionne,
+                                "code_app": code_app,
+                                "role": data["role"],
+                                "perimetre": data["perimetre"]
+                            }, on_conflict="login, code_app").execute()
+                        else:
+                            # Suppression si l'accès a été décoché
+                            supabase.table("Autorisation") \
+                                .delete() \
+                                .eq("login", u_selectionne) \
+                                .eq("code_app", code_app) \
+                                .execute()
+
+                    st.success(f"✅ Habilitations mises à jour avec succès pour '{u_selectionne}' !")
+                    st.balloons()
+                    st.rerun()
+
         except Exception as e:
-            st.error(f"Erreur matrice : {e}")
+            st.error(f"Erreur lors de la gestion des habilitations : {e}")
 
     # --- ONGLET 4 : COMPTES UTILISATEURS ---
     with tab_users:
@@ -439,6 +519,7 @@ if est_admin:
                             st.rerun()
             except Exception as e:
                 st.error(f"Erreur Sites : {e}")
+
         # -------------------------------------------------------------
         # 5.4 GESTION DES SOCIÉTÉS (PRESTATAIRES)
         # -------------------------------------------------------------
