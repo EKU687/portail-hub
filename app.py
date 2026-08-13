@@ -292,64 +292,133 @@ if est_admin:
         except Exception as e:
             st.error(f"Erreur lors de la gestion des habilitations : {e}")
 
-    # --- ONGLET 4 : COMPTES UTILISATEURS ---
+    # =====================================================================
+    # --- ONGLET 4 : COMPTES UTILISATEURS (ALIMENTÉ PAR REFERO) ---
+    # =====================================================================
     with tab_users:
         st.subheader("👥 Gestion des Comptes Utilisateurs (Table `Utilisateur`)")
-        with st.expander("➕ Créer ou Réinitialiser un Compte", expanded=False):
+        st.caption("Création et gestion des comptes utilisateurs avec attribution des services REFERO.")
+        
+        # 1. Chargement dynamique des référentiels REFERO
+        try:
+            res_dirs = supabase.table("Directions").select("id, sigle_direction, nom_direction").eq("actif", True).execute()
+            res_servs = supabase.table("Services").select("id, sigle_service, nom_service, id_direction").eq("actif", True).execute()
+            
+            liste_dirs = res_dirs.data or []
+            liste_servs = res_servs.data or []
+            
+            # Map pour afficher "SIGLE - Nom de la Direction"
+            map_dirs_form = {f"{d['sigle_direction']} - {d['nom_direction']}": d for d in liste_dirs}
+        except Exception as e:
+            st.error(f"❌ Erreur lors du chargement des référentiels REFERO : {e}")
+            liste_dirs, liste_servs, map_dirs_form = [], [], {}
+
+        # 2. Formulaire d'ajout / modification de compte
+        with st.expander("➕ Créer ou Réinitialiser un Compte Utilisateur", expanded=False):
+            
+            # Sélecteur Étape 1 : Choix de la Direction
+            choix_dir_label = st.selectbox(
+                "🏢 1. Choisir d'abord la Direction de rattachement (REFERO) :", 
+                options=["-- Sélectionner une Direction --"] + list(map_dirs_form.keys())
+            )
+
+            # Filtrage Étape 2 : Services de la Direction sélectionnée
+            servs_disponibles = []
+            if choix_dir_label != "-- Sélectionner une Direction --":
+                dir_obj = map_dirs_form[choix_dir_label]
+                servs_disponibles = [
+                    f"{s['sigle_service']} - {s['nom_service']}" 
+                    for s in liste_servs 
+                    if s.get("id_direction") == dir_obj["id"]
+                ]
+
             with st.form("form_gestion_compte_portail", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
-                f_login = c1.text_input("Identifiant / Login").lower().strip()
-                f_mdp = c1.text_input("Nouveau Mot de Passe", type="password")
-                f_nom = c2.text_input("Nom Complet / Libellé")
-                f_role = c2.selectbox("Rôle", ["USER", "ADMIN"])
-                f_service = c3.text_input("Code Service")
+                f_login = c1.text_input("Identifiant / Login *").lower().strip()
+                f_mdp = c1.text_input("Mot de Passe *", type="password")
+                f_nom = c2.text_input("Nom Complet / Libellé *").strip()
+                f_role = c2.selectbox("Rôle Portail", ["USER", "ADMIN"])
+                
+                # Menu déroulant filtré pour le service
+                f_service_str = c3.selectbox(
+                    "2. Service de rattachement *", 
+                    options=servs_disponibles if servs_disponibles else ["👈 Choisissez d'abord une direction"]
+                )
 
-                if st.form_submit_button("💾 Enregistrer le Compte", use_container_width=True):
-                    if not f_login or not f_mdp or not f_nom:
-                        st.warning("⚠️ Le Login, le Mot de Passe et le Nom sont requis.")
-                    else:
-                        hash_mdp = auth.hacher_mot_de_passe(f_mdp)
-                        try:
-                            res_exist = supabase.table("Utilisateur").select("id").eq("login", f_login).execute()
-                            donnees_compte = {"login": f_login, "mdp": hash_mdp, "nom": f_nom, "role": f_role, "service": f_service or "NON DÉFINI"}
-                            if res_exist.data:
-                                supabase.table("Utilisateur").update(donnees_compte).eq("login", f_login).execute()
-                                st.success(f"✅ Compte '{f_login}' mis à jour !")
-                            else:
-                                supabase.table("Utilisateur").insert(donnees_compte).execute()
-                                st.success(f"✅ Compte '{f_login}' créé !")
-                            st.rerun()
-                        except Exception as err:
-                            st.error(f"❌ Erreur Supabase : {err}")
+                btn_valider_compte = st.form_submit_button(
+                    "💾 Enregistrer le Compte", type="primary", use_container_width=True
+                )
+
+            # Traitement lors du clic sur Enregistrer
+            if btn_valider_compte:
+                # Récupération du sigle (ex: 'SANL' à partir de 'SANL - Service des affaires...')
+                code_service_clean = f_service_str.split(" - ")[0] if " - " in f_service_str else None
+
+                if not f_login or not f_mdp or not f_nom or not code_service_clean or "Choisissez" in f_service_str:
+                    st.warning("⚠️ Tous les champs (Login, Mot de passe, Nom, Direction et Service) sont obligatoires.")
+                else:
+                    hash_mdp = auth.hacher_mot_de_passe(f_mdp)
+                    try:
+                        res_exist = supabase.table("Utilisateur").select("id").eq("login", f_login).execute()
+                        donnees_compte = {
+                            "login": f_login, 
+                            "mdp": hash_mdp, 
+                            "nom": f_nom, 
+                            "role": f_role, 
+                            "service": code_service_clean
+                        }
+                        
+                        if res_exist.data:
+                            supabase.table("Utilisateur").update(donnees_compte).eq("login", f_login).execute()
+                            st.success(f"✅ Compte `{f_login}` mis à jour avec le service **{code_service_clean}** !")
+                        else:
+                            supabase.table("Utilisateur").insert(donnees_compte).execute()
+                            st.success(f"✅ Compte `{f_login}` créé avec le service **{code_service_clean}** !")
+                        
+                        st.rerun()
+                    except Exception as err:
+                        st.error(f"❌ Erreur lors de l'enregistrement Supabase : {err}")
 
         st.divider()
+        
+        # 3. Tableau de consultation et édition rapide
         try:
             res_users = supabase.table("Utilisateur").select("*").order("login").execute()
             liste_users = res_users.data or []
+            
             if liste_users:
+                st.markdown("#### 📋 Liste des Comptes Utilisateurs")
                 with st.form("form_editeur_liste_utilisateurs"):
                     st.data_editor(
-                        liste_users, key="editeur_utilisateurs_portail", use_container_width=True, hide_index=True, num_rows="dynamic",
+                        liste_users, 
+                        key="editeur_utilisateurs_portail", 
+                        use_container_width=True, 
+                        hide_index=True, 
+                        num_rows="dynamic",
                         column_order=["login", "nom", "role", "service"],
                         column_config={
                             "login": st.column_config.TextColumn("Login", disabled=True),
-                            "nom": st.column_config.TextColumn("Nom", required=True),
-                            "role": st.column_config.SelectboxColumn("Rôle", options=["USER", "ADMIN"], required=True),
-                            "service": st.column_config.TextColumn("Service"),
+                            "nom": st.column_config.TextColumn("Nom complet", required=True),
+                            "role": st.column_config.SelectboxColumn("Rôle Portail", options=["USER", "ADMIN"], required=True),
+                            "service": st.column_config.TextColumn("Code Service (REFERO)", required=True),
                         },
                     )
-                    if st.form_submit_button("💾 Sauvegarder les modifications Comptes", use_container_width=True):
+                    
+                    if st.form_submit_button("💾 Sauvegarder les modifications du tableau", use_container_width=True):
                         j_u = st.session_state["editeur_utilisateurs_portail"]
+                        
                         if j_u.get("deleted_rows"):
                             for idx in j_u["deleted_rows"]:
                                 supabase.table("Utilisateur").delete().eq("login", liste_users[int(idx)]["login"]).execute()
+                        
                         if j_u.get("edited_rows"):
                             for idx, modifs in j_u["edited_rows"].items():
                                 supabase.table("Utilisateur").update(modifs).eq("login", liste_users[int(idx)]["login"]).execute()
-                        st.success("✅ Base Utilisateurs mise à jour !")
+                        
+                        st.success("✅ Modifications sauvegardées !")
                         st.rerun()
         except Exception as e:
-            st.error(f"Erreur utilisateurs : {e}")
+            st.error(f"❌ Erreur de lecture de la table Utilisateur : {e}")
 
     # =====================================================================
     # --- ONGLET 5 : RÉFÉRENTIELS (REFERO) ---
