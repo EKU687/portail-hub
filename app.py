@@ -1,7 +1,8 @@
 # =====================================================================
 # APPLICATION : PORTAIL CENTRAL HUB (portail-gnc)
 # Inclus : Catalogue dynamique, Matrice de droits granulaire, 
-#           Gestion Utilisateurs, Chiffrement / Modification de MDP autonome,
+#           Gestion Utilisateurs (avec Email & Rôle Imprimeur), 
+#           Chiffrement / Modification de MDP autonome,
 #           et REFERO (Gestion des référentiels MDM).
 # =====================================================================
 import cadre_entreprise.auth as auth
@@ -197,7 +198,6 @@ if est_admin:
             )
 
             if u_selectionne:
-                # Récupération de l'ensemble des autorisations enregistrées pour cet utilisateur
                 res_d = supabase.table("Autorisation").select("*").eq("login", u_selectionne).execute()
                 auths_utilisateur = {d["code_app"]: d for d in (res_d.data or [])}
 
@@ -213,7 +213,6 @@ if est_admin:
                         icone_app = app.get("icone", "📱")
 
                         if code_app:
-                            # État actuel en base de données
                             auth_actuelle = auths_utilisateur.get(code_app, {})
                             est_autorise = code_app in auths_utilisateur
                             role_actuel = auth_actuelle.get("role") or "UTILISATEUR"
@@ -222,14 +221,12 @@ if est_admin:
                             st.markdown(f"##### {icone_app} **{nom_app}** (`{code_app}`)")
                             col_chk, col_role, col_perim = st.columns([1.5, 2, 2])
 
-                            # 1. Case d'activation d'accès
                             acces = col_chk.checkbox(
                                 "Autoriser l'accès", 
                                 value=est_autorise, 
                                 key=f"chk_{u_selectionne}_{code_app}"
                             )
 
-                            # 2. Sélecteur de Rôle (Spécifique IDENTIS vs Standard)
                             if code_app == "IDENTIS":
                                 liste_roles = ["GESTIONNAIRE_LOCAL", "ADMIN_NEDAP", "IMPRIMEUR", "SUPER_ADMIN"]
                             else:
@@ -245,7 +242,6 @@ if est_admin:
                                 key=f"role_{u_selectionne}_{code_app}"
                             )
 
-                            # 3. Sélecteur de Périmètre
                             liste_perim = ["RESTREINT", "TOUT"]
                             idx_perim = liste_perim.index(perim_actuel) if perim_actuel in liste_perim else 0
                             
@@ -270,7 +266,6 @@ if est_admin:
                 if btn_sauver_droits:
                     for code_app, data in modifications.items():
                         if data["acces"]:
-                            # Upsert pour insérer ou mettre à jour la ligne avec le rôle et périmètre
                             supabase.table("Autorisation").upsert({
                                 "login": u_selectionne,
                                 "code_app": code_app,
@@ -278,7 +273,6 @@ if est_admin:
                                 "perimetre": data["perimetre"]
                             }, on_conflict="login, code_app").execute()
                         else:
-                            # Suppression si l'accès a été décoché
                             supabase.table("Autorisation") \
                                 .delete() \
                                 .eq("login", u_selectionne) \
@@ -293,11 +287,11 @@ if est_admin:
             st.error(f"Erreur lors de la gestion des habilitations : {e}")
 
     # =====================================================================
-    # --- ONGLET 4 : COMPTES UTILISATEURS (ALIMENTÉ PAR REFERO) ---
+    # --- ONGLET 4 : COMPTES UTILISATEURS (AVEC EMAIL & RÔLE IMPRIMEUR) ---
     # =====================================================================
     with tab_users:
         st.subheader("👥 Gestion des Comptes Utilisateurs (Table `Utilisateur`)")
-        st.caption("Création et gestion des comptes utilisateurs avec attribution des services REFERO.")
+        st.caption("Création et gestion des comptes utilisateurs avec attribution des services REFERO et notifications email.")
         
         # 1. Chargement dynamique des référentiels REFERO
         try:
@@ -307,7 +301,6 @@ if est_admin:
             liste_dirs = res_dirs.data or []
             liste_servs = res_servs.data or []
             
-            # Map pour afficher "SIGLE - Nom de la Direction"
             map_dirs_form = {f"{d['sigle_direction']} - {d['nom_direction']}": d for d in liste_dirs}
         except Exception as e:
             st.error(f"❌ Erreur lors du chargement des référentiels REFERO : {e}")
@@ -316,13 +309,11 @@ if est_admin:
         # 2. Formulaire d'ajout / modification de compte
         with st.expander("➕ Créer ou Réinitialiser un Compte Utilisateur", expanded=False):
             
-            # Sélecteur Étape 1 : Choix de la Direction
             choix_dir_label = st.selectbox(
                 "🏢 1. Choisir d'abord la Direction de rattachement (REFERO) :", 
                 options=["-- Sélectionner une Direction --"] + list(map_dirs_form.keys())
             )
 
-            # Filtrage Étape 2 : Services de la Direction sélectionnée
             servs_disponibles = []
             if choix_dir_label != "-- Sélectionner une Direction --":
                 dir_obj = map_dirs_form[choix_dir_label]
@@ -333,14 +324,16 @@ if est_admin:
                 ]
 
             with st.form("form_gestion_compte_portail", clear_on_submit=True):
-                c1, c2, c3 = st.columns(3)
-                f_login = c1.text_input("Identifiant / Login *").lower().strip()
-                f_mdp = c1.text_input("Mot de Passe *", type="password")
-                f_nom = c2.text_input("Nom Complet / Libellé *").strip()
-                f_role = c2.selectbox("Rôle Portail", ["USER", "ADMIN"])
+                col_u1, col_u2, col_u3 = st.columns(3)
+                f_login = col_u1.text_input("Identifiant / Login *").lower().strip()
+                f_mdp = col_u1.text_input("Mot de Passe *", type="password")
                 
-                # Menu déroulant filtré pour le service
-                f_service_str = c3.selectbox(
+                f_nom = col_u2.text_input("Nom Complet / Libellé *").strip()
+                f_email = col_u2.text_input("Adresse Email Officielle *", placeholder="prenom.nom@gouv.nc").strip()
+                
+                # 🌟 AJOUT DU RÔLE IMPRIMEUR DANS LE SELECTBOX
+                f_role = col_u3.selectbox("Rôle Portail *", ["USER", "ADMIN", "IMPRIMEUR"])
+                f_service_str = col_u3.selectbox(
                     "2. Service de rattachement *", 
                     options=servs_disponibles if servs_disponibles else ["👈 Choisissez d'abord une direction"]
                 )
@@ -351,29 +344,32 @@ if est_admin:
 
             # Traitement lors du clic sur Enregistrer
             if btn_valider_compte:
-                # Récupération du sigle (ex: 'SANL' à partir de 'SANL - Service des affaires...')
                 code_service_clean = f_service_str.split(" - ")[0] if " - " in f_service_str else None
 
-                if not f_login or not f_mdp or not f_nom or not code_service_clean or "Choisissez" in f_service_str:
-                    st.warning("⚠️ Tous les champs (Login, Mot de passe, Nom, Direction et Service) sont obligatoires.")
+                if not f_login or not f_mdp or not f_nom or not f_email or not code_service_clean or "Choisissez" in f_service_str:
+                    st.warning("⚠️ Tous les champs (Login, Mot de passe, Nom, Email, Direction et Service) sont obligatoires.")
+                elif "@" not in f_email:
+                    st.error("❌ Veuillez renseigner une adresse email valide.")
                 else:
                     hash_mdp = auth.hacher_mot_de_passe(f_mdp)
                     try:
                         res_exist = supabase.table("Utilisateur").select("id").eq("login", f_login).execute()
+                        
                         donnees_compte = {
                             "login": f_login, 
                             "mdp": hash_mdp, 
                             "nom": f_nom, 
-                            "role": f_role, 
+                            "email": f_email,  # 🌟 Sauvegarde de l'email
+                            "role": f_role,    # 🌟 Contient "USER", "ADMIN" ou "IMPRIMEUR"
                             "service": code_service_clean
                         }
                         
                         if res_exist.data:
                             supabase.table("Utilisateur").update(donnees_compte).eq("login", f_login).execute()
-                            st.success(f"✅ Compte `{f_login}` mis à jour avec le service **{code_service_clean}** !")
+                            st.success(f"✅ Compte `{f_login}` mis à jour avec le rôle **{f_role}** et l'email **{f_email}** !")
                         else:
                             supabase.table("Utilisateur").insert(donnees_compte).execute()
-                            st.success(f"✅ Compte `{f_login}` créé avec le service **{code_service_clean}** !")
+                            st.success(f"✅ Compte `{f_login}` créé avec succès !")
                         
                         st.rerun()
                     except Exception as err:
@@ -381,7 +377,7 @@ if est_admin:
 
         st.divider()
         
-        # 3. Tableau de consultation et édition rapide
+        # 3. Tableau de consultation et édition rapide (st.data_editor)
         try:
             res_users = supabase.table("Utilisateur").select("*").order("login").execute()
             liste_users = res_users.data or []
@@ -395,11 +391,12 @@ if est_admin:
                         use_container_width=True, 
                         hide_index=True, 
                         num_rows="dynamic",
-                        column_order=["login", "nom", "role", "service"],
+                        column_order=["login", "nom", "email", "role", "service"],
                         column_config={
                             "login": st.column_config.TextColumn("Login", disabled=True),
                             "nom": st.column_config.TextColumn("Nom complet", required=True),
-                            "role": st.column_config.SelectboxColumn("Rôle Portail", options=["USER", "ADMIN"], required=True),
+                            "email": st.column_config.TextColumn("Adresse Email", required=True), # 🌟 Colonne Email éditable
+                            "role": st.column_config.SelectboxColumn("Rôle Portail", options=["USER", "ADMIN", "IMPRIMEUR"], required=True), # 🌟 Option IMPRIMEUR
                             "service": st.column_config.TextColumn("Code Service (REFERO)", required=True),
                         },
                     )
@@ -415,7 +412,7 @@ if est_admin:
                             for idx, modifs in j_u["edited_rows"].items():
                                 supabase.table("Utilisateur").update(modifs).eq("login", liste_users[int(idx)]["login"]).execute()
                         
-                        st.success("✅ Modifications sauvegardées !")
+                        st.success("✅ Modifications des comptes sauvegardées !")
                         st.rerun()
         except Exception as e:
             st.error(f"❌ Erreur de lecture de la table Utilisateur : {e}")
@@ -529,7 +526,7 @@ if est_admin:
                     )
             except Exception as e:
                 st.error(f"Erreur Services : {e}")
-                
+
         # -------------------------------------------------------------
         # 5.3 SITES (AVEC NORME NEDAP)
         # -------------------------------------------------------------
@@ -620,7 +617,6 @@ if est_admin:
                         else:
                             st.warning("Le nom de la société est obligatoire.")
 
-            # Affichage et Édition des Sociétés
             try:
                 res_soc = supabase.table("Societes").select("*").order("nom_societe").execute()
                 liste_soc = res_soc.data or []
