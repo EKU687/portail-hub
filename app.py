@@ -3,7 +3,7 @@
 # Inclus : Catalogue dynamique, Matrice de droits granulaire, 
 #           Gestion Utilisateurs (avec Email & Rôle Imprimeur), 
 #           Chiffrement / Modification de MDP autonome,
-#           et REFERO (Gestion des référentiels MDM).
+#           et REFERO (Gestion des référentiels MDM avec liaison Site/Direction).
 # =====================================================================
 import cadre_entreprise.auth as auth
 import cadre_entreprise.ui as ui
@@ -395,8 +395,8 @@ if est_admin:
                         column_config={
                             "login": st.column_config.TextColumn("Login", disabled=True),
                             "nom": st.column_config.TextColumn("Nom complet", required=True),
-                            "email": st.column_config.TextColumn("Adresse Email", required=True), # 🌟 Colonne Email éditable
-                            "role": st.column_config.SelectboxColumn("Rôle Portail", options=["USER", "ADMIN", "IMPRIMEUR"], required=True), # 🌟 Option IMPRIMEUR
+                            "email": st.column_config.TextColumn("Adresse Email", required=True),
+                            "role": st.column_config.SelectboxColumn("Rôle Portail", options=["USER", "ADMIN", "IMPRIMEUR"], required=True),
                             "service": st.column_config.TextColumn("Code Service (REFERO)", required=True),
                         },
                     )
@@ -426,30 +426,55 @@ if est_admin:
         
         sub_dir, sub_serv, sub_site, sub_soc = st.tabs(["🏢 Directions", "📂 Services", "📍 Sites", "🤝 Sociétés"])
         
+        # Chargement global des sites pour REFERO
+        try:
+            res_all_sites = supabase.table("Sites").select("id, code_site, nom_site").eq("actif", True).execute()
+            map_sites_refero = {
+                row["id"]: f"{row.get('code_site', '')} — {row.get('nom_site', '')}".strip(" —")
+                for row in (res_all_sites.data or [])
+            }
+        except Exception as e:
+            map_sites_refero = {}
+
         # -------------------------------------------------------------
-        # 5.1 DIRECTIONS
+        # 5.1 DIRECTIONS (AVEC RACCORDEMENT SITE PHYSIQUE)
         # -------------------------------------------------------------
         with sub_dir:
             with st.expander("➕ Ajouter une Direction", expanded=False):
                 with st.form("form_add_direction", clear_on_submit=True):
                     c1, c2 = st.columns(2)
-                    nom_dir = c1.text_input("Nom de la direction *")
-                    sigle_dir = c2.text_input("Sigle (ex: DTSI) *").upper()
-                    code_dir = st.text_input("Code direction")
+                    nom_dir = c1.text_input("Nom de la direction *", placeholder="Ex: Direction des Affaires Sanitaires")
+                    sigle_dir = c2.text_input("Sigle (ex: DASS) *").upper().strip()
+                    
+                    c3, c4 = st.columns(2)
+                    # 📍 SELECTION DU SITE PHYSIQUE (Nouvelle fonctionnalité)
+                    site_id_selected = c3.selectbox(
+                        "Site physique d'affectation *",
+                        options=[""] + list(map_sites_refero.keys()),
+                        format_func=lambda x: map_sites_refero.get(x, "-- Choisir un site physique --")
+                    )
+                    code_dir_input = c4.text_input("Code direction (optionnel)", placeholder="Ex: DASS-DOUMER").upper().strip()
                     
                     if st.form_submit_button("💾 Enregistrer Direction", type="primary"):
-                        if nom_dir and sigle_dir:
+                        if nom_dir and sigle_dir and site_id_selected:
                             try:
+                                # Génération automatique du code s'il est vide (ex: DASS-DOUMER)
+                                code_site_str = map_sites_refero[site_id_selected].split(" — ")[0]
+                                code_final = code_dir_input if code_dir_input else f"{sigle_dir}-{code_site_str}"
+
                                 supabase.table("Directions").insert({
-                                    "nom_direction": nom_dir, "sigle_direction": sigle_dir,
-                                    "code_direction": code_dir, "actif": True
+                                    "nom_direction": nom_dir,
+                                    "sigle_direction": sigle_dir,
+                                    "code_direction": code_final,
+                                    "id_site": site_id_selected,  # 👈 Sauvegarde de la Clé Étrangère
+                                    "actif": True
                                 }).execute()
-                                st.success(f"✅ Direction {sigle_dir} ajoutée !")
+                                st.success(f"✅ Direction '{sigle_dir}' ajoutée sur le site {code_site_str} !")
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Erreur : {e}")
                         else:
-                            st.warning("Le nom et le sigle sont obligatoires.")
+                            st.warning("⚠️ Le nom, le sigle et le site physique d'affectation sont obligatoires.")
             
             try:
                 res_dir = supabase.table("Directions").select("*").order("sigle_direction").execute()
@@ -459,11 +484,17 @@ if est_admin:
                     with st.form("form_edit_directions"):
                         st.data_editor(
                             liste_dir, key="edit_directions", use_container_width=True, hide_index=True, num_rows="dynamic",
-                            column_order=["sigle_direction", "nom_direction", "code_direction", "actif"],
+                            column_order=["sigle_direction", "nom_direction", "code_direction", "id_site", "actif"],
                             column_config={
                                 "sigle_direction": st.column_config.TextColumn("Sigle", required=True),
                                 "nom_direction": st.column_config.TextColumn("Nom complet"),
-                                "code_direction": st.column_config.TextColumn("Code"),
+                                "code_direction": st.column_config.TextColumn("Code Direction"),
+                                "id_site": st.column_config.SelectboxColumn(
+                                    "Site d'affectation",
+                                    options=list(map_sites_refero.keys()),
+                                    format_func=lambda x: map_sites_refero.get(x, "Non défini"),
+                                    required=True
+                                ),
                                 "actif": st.column_config.CheckboxColumn("Actif", default=True)
                             }
                         )
