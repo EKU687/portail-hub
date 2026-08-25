@@ -1,7 +1,7 @@
 # =====================================================================
 # APPLICATION : PORTAIL CENTRAL HUB (portail-gnc)
 # Inclus : Catalogue dynamique, Matrice de droits granulaire,
-#          Gestion Utilisateurs (avec Email, Rôle Imprimeur & Site de travail ORBIS),
+#          Gestion Utilisateurs (avec Email, Rôles ORBIS / Portail & Site de travail),
 #          Chiffrement / Modification de MDP autonome,
 #          et REFERO (Gestion des référentiels MDM avec liaison Site/Direction).
 # =====================================================================
@@ -30,8 +30,17 @@ if not auth.est_connecte():
 ui.afficher_sidebar_standard()
 
 # =====================================================================
-# 3. HELPER : RÉCUPÉRATION DES SITES ACTIFS POUR DOWNSHIFT/ORBIS
+# 3. MATRICE GLOBALE DES RÔLES & HELPER SITES
 # =====================================================================
+# Liste officielle des rôles partagés entre Portail HUB et ORBIS
+ROLES_PORTAIL_ET_ORBIS = [
+    "AGENT_SECU",  # Agent de Garde / Rondier (ORBIS)
+    "HABI_ORBIS",  # Agent Habilité / Chef de Poste (ORBIS)
+    "CHARGE_SURETE",  # Chargé de Sûreté
+    "USER",  # Utilisateur standard Portail
+    "ADMIN",  # Administrateur Général
+    "IMPRIMEUR",  # Rôle spécifique badges / impression
+]
 
 
 def obtenir_sites_actifs_liste() -> list[str]:
@@ -435,7 +444,7 @@ if est_admin:
             st.error(f"Erreur lors de la gestion des habilitations : {e}")
 
     # =====================================================================
-    # --- ONGLET 4 : COMPTES UTILISATEURS (AVEC SITE DE TRAVAIL ORBIS) ---
+    # --- ONGLET 4 : COMPTES UTILISATEURS (ROLES ORBIS & SITE DE TRAVAIL) ---
     # =====================================================================
     with tab_users:
         st.subheader(
@@ -443,7 +452,8 @@ if est_admin:
         )
         st.caption(
             "Création et gestion des comptes utilisateurs avec attribution des"
-            " services REFERO, du site de travail ORBIS et des emails."
+            " services REFERO, des rôles applicatifs (Portail & ORBIS) et du"
+            " site de travail."
         )
 
         # 1. Chargement dynamique des référentiels REFERO & SITES
@@ -509,9 +519,15 @@ if est_admin:
                     placeholder="prenom.nom@gouv.nc",
                 ).strip()
 
-                # Rôle Portail & Service
+                # 🌟 SELECTION DU RÔLE (PORTAIL & ORBIS)
                 f_role = col_u3.selectbox(
-                    "Rôle Portail *", ["USER", "ADMIN", "IMPRIMEUR"]
+                    "🔑 Rôle & Habilitation *",
+                    options=ROLES_PORTAIL_ET_ORBIS,
+                    index=0,
+                    help=(
+                        "AGENT_SECU et HABI_ORBIS sont requis pour l'accès à"
+                        " la Main Courante ORBIS."
+                    ),
                 )
                 f_service_str = col_u3.selectbox(
                     "2. Service de rattachement *",
@@ -576,9 +592,9 @@ if est_admin:
                             "mdp": hash_mdp,
                             "nom": f_nom,
                             "email": f_email,
-                            "role": f_role,
+                            "role": f_role,  # Sauvegarde du rôle choisi (ex: AGENT_SECU, HABI_ORBIS, ADMIN)
                             "service": code_service_clean,
-                            "site_defaut": f_site_defaut,  # 🌟 Sauvegarde du site de travail
+                            "site_defaut": f_site_defaut,  # Sauvegarde du site de travail
                         }
 
                         if res_exist.data:
@@ -595,8 +611,9 @@ if est_admin:
                                 donnees_compte
                             ).execute()
                             st.success(
-                                f"✅ Compte `{f_login}` créé avec succès sur le"
-                                f" site **{f_site_defaut}** !"
+                                f"✅ Compte `{f_login}` créé avec succès avec"
+                                f" le rôle **{f_role}** sur le site"
+                                f" **{f_site_defaut}** !"
                             )
 
                         st.rerun()
@@ -608,7 +625,7 @@ if est_admin:
 
         st.divider()
 
-        # 3. Tableau de consultation et édition rapide avec colonne 'site_defaut'
+        # 3. Tableau de consultation et édition rapide avec rôles mis à jour
         try:
             res_users = (
                 supabase.table("Utilisateur")
@@ -646,8 +663,8 @@ if est_admin:
                                 "Adresse Email", required=True
                             ),
                             "role": st.column_config.SelectboxColumn(
-                                "Rôle Portail",
-                                options=["USER", "ADMIN", "IMPRIMEUR"],
+                                "Rôle (Portail & ORBIS)",
+                                options=ROLES_PORTAIL_ET_ORBIS,  # 🌟 Inclut AGENT_SECU, HABI_ORBIS, etc.
                                 required=True,
                             ),
                             "service": st.column_config.TextColumn(
