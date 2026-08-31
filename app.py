@@ -3,8 +3,10 @@
 # Inclus : Catalogue dynamique, Matrice de droits granulaire,
 #          Gestion Utilisateurs (avec Email, Rôles ORBIS / Portail & Site de travail),
 #          Chiffrement / Modification de MDP autonome,
+#          Redirection Sécurisée par Jeton Inter-Applications (Sessions_Portail),
 #          et REFERO (Gestion des référentiels MDM avec liaison Site/Direction).
 # =====================================================================
+import uuid
 import cadre_entreprise.auth as auth
 import cadre_entreprise.ui as ui
 from cadre_entreprise.database import supabase
@@ -64,14 +66,55 @@ def obtenir_sites_actifs_liste() -> list[str]:
 
 
 # =====================================================================
-# 4. PROFIL UTILISATEUR & MODIFICATION DE MOT DE PASSE
+# 4. PROFIL UTILISATEUR, HELPER REDIRECTION & MOT DE PASSE
 # =====================================================================
 user = auth.get_user_info()
 user_login = str(user.get("login", "")).lower().strip()
 user_role = str(user.get("role", "")).upper().strip()
+user_id_num = user.get("id")  # ID numérique BIGINT de Utilisateurs
 
 # Définition des privilèges Administrateur
 est_admin = (user_role == "ADMIN") or (user_login in ["admin", "eric.kuter"])
+
+
+def rediriger_vers_application(app_code: str, app_nom: str, url_base: str):
+    """Génère un jeton temporaire unique (Sessions_Portail) et redirige l'agent vers l'application satellite."""
+    try:
+        # 1. Génération du token unique
+        token_session = f"GNC-{app_code.upper()}-{uuid.uuid4().hex[:12].upper()}"
+
+        # 2. Enregistrement en BDD Supabase (Table Sessions_Portail)
+        payload_session = {
+            "token": token_session,
+            "user_id": user_id_num,
+            "application_cible": app_code.upper(),
+            "actif": True,
+        }
+        supabase.table("Sessions_Portail").insert(payload_session).execute()
+
+        # 3. Construction de l'URL finale avec le paramètre session_token
+        url_securisee = f"{url_base}?session_token={token_session}"
+
+        # 4. Feedback utilisateur & Redirection automatique
+        st.success(
+            f"🔄 **Jeton de sécurité généré !** Redirection vers **{app_nom}**..."
+        )
+        st.markdown(
+            f"""
+            <meta http-equiv="refresh" content="0;url={url_securisee}">
+            <script type="text/javascript">
+                window.location.href = "{url_securisee}";
+            </script>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    except Exception as err:
+        st.error(
+            f"❌ Erreur lors du lancement sécurisé de l'application {app_nom} :"
+            f" {err}"
+        )
+
 
 with st.sidebar:
     st.divider()
@@ -125,7 +168,7 @@ else:
 
 
 # =====================================================================
-# ONGLET 1 : CATALOGUE FILTRÉ
+# ONGLET 1 : CATALOGUE FILTRÉ (AVEC LANCEMENT SÉCURISÉ)
 # =====================================================================
 with tab_apps:
     st.subheader("🚀 Vos Applications Autorisées")
@@ -161,17 +204,28 @@ with tab_apps:
     if apps_visibles:
         cols = st.columns(2)
         for index, app in enumerate(apps_visibles):
+            code_app = app.get("code_app") or app.get("code") or f"APP_{index}"
+            nom_app = app.get("nom", "Application")
+            url_app = app.get("url", "#")
+            icone_app = app.get("icone", "📱")
+
             with cols[index % 2]:
                 with st.container(border=True):
-                    st.markdown(
-                        f"### {app.get('icone', '📱')} {app.get('nom')}"
-                    )
+                    st.markdown(f"### {icone_app} {nom_app}")
                     st.caption(app.get("description", ""))
-                    st.link_button(
-                        f"Ouvrir {app.get('nom')} ↗️",
-                        app.get("url", "#"),
+
+                    # 🎯 LANCEMENT SÉCURISÉ PAR JETON DE SESSION (PORTAL GUARD)
+                    if st.button(
+                        f"🚀 Lancer {nom_app}",
+                        key=f"btn_launch_{code_app}_{index}",
+                        type="primary",
                         use_container_width=True,
-                    )
+                    ):
+                        rediriger_vers_application(
+                            app_code=code_app,
+                            app_nom=nom_app,
+                            url_base=url_app,
+                        )
     else:
         st.info("ℹ️ Aucune application ne vous est actuellement attribuée.")
 
@@ -456,7 +510,6 @@ if est_admin:
             " site de travail."
         )
 
-        # 1. Chargement dynamique des référentiels REFERO & SITES
         sites_disponibles = obtenir_sites_actifs_liste()
 
         try:
@@ -486,7 +539,6 @@ if est_admin:
             )
             liste_dirs, liste_servs, map_dirs_form = [], [], {}
 
-        # 2. Formulaire d'ajout / modification de compte
         with st.expander(
             "➕ Créer ou Réinitialiser un Compte Utilisateur", expanded=False
         ):
@@ -519,7 +571,6 @@ if est_admin:
                     placeholder="prenom.nom@gouv.nc",
                 ).strip()
 
-                # 🌟 SELECTION DU RÔLE (PORTAIL & ORBIS)
                 f_role = col_u3.selectbox(
                     "🔑 Rôle & Habilitation *",
                     options=ROLES_PORTAIL_ET_ORBIS,
@@ -536,7 +587,6 @@ if est_admin:
                     else ["👈 Choisissez d'abord une direction"],
                 )
 
-                # 🎯 SELECTION DU SITE DE TRAVAIL (ORBIS / SÛRETÉ)
                 f_site_defaut = st.selectbox(
                     "📍 3. Site de travail / PC Garde de rattachement (ORBIS) *",
                     options=sites_disponibles,
@@ -555,7 +605,6 @@ if est_admin:
                     use_container_width=True,
                 )
 
-            # Traitement lors du clic sur Enregistrer
             if btn_valider_compte:
                 code_service_clean = (
                     f_service_str.split(" - ")[0]
@@ -592,9 +641,9 @@ if est_admin:
                             "mdp": hash_mdp,
                             "nom": f_nom,
                             "email": f_email,
-                            "role": f_role,  # Sauvegarde du rôle choisi (ex: AGENT_SECU, HABI_ORBIS, ADMIN)
+                            "role": f_role,
                             "service": code_service_clean,
-                            "site_defaut": f_site_defaut,  # Sauvegarde du site de travail
+                            "site_defaut": f_site_defaut,
                         }
 
                         if res_exist.data:
@@ -625,7 +674,6 @@ if est_admin:
 
         st.divider()
 
-        # 3. Tableau de consultation et édition rapide avec rôles mis à jour
         try:
             res_users = (
                 supabase.table("Utilisateur")
@@ -664,7 +712,7 @@ if est_admin:
                             ),
                             "role": st.column_config.SelectboxColumn(
                                 "Rôle (Portail & ORBIS)",
-                                options=ROLES_PORTAIL_ET_ORBIS,  # 🌟 Inclut AGENT_SECU, HABI_ORBIS, etc.
+                                options=ROLES_PORTAIL_ET_ORBIS,
                                 required=True,
                             ),
                             "service": st.column_config.TextColumn(
@@ -718,7 +766,6 @@ if est_admin:
             ["🏢 Directions", "📂 Services", "📍 Sites", "🤝 Sociétés"]
         )
 
-        # Chargement global des sites pour REFERO
         try:
             res_all_sites = (
                 supabase.table("Sites")
@@ -737,7 +784,7 @@ if est_admin:
             map_sites_refero = {}
 
         # -------------------------------------------------------------
-        # 5.1 DIRECTIONS (AVEC RACCORDEMENT SITE PHYSIQUE)
+        # 5.1 DIRECTIONS
         # -------------------------------------------------------------
         with sub_dir:
             with st.expander("➕ Ajouter une Direction", expanded=False):
