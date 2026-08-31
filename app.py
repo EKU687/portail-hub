@@ -78,12 +78,15 @@ est_admin = (user_role == "ADMIN") or (user_login in ["admin", "eric.kuter"])
 
 
 def rediriger_vers_application(app_code: str, app_nom: str, url_base: str):
-    """Génère un jeton temporaire unique (Sessions_Portail) et redirige l'agent vers l'application satellite."""
+    """Génère un jeton temporaire unique (Sessions_Portail) et propose le lien sécurisé vers l'application cible."""
     try:
-        # 1. Génération du token unique
+        # 1. Nettoyage de l'URL de base (suppression des slashs finaux)
+        url_clean = str(url_base).strip().rstrip("/")
+
+        # 2. Génération du token unique
         token_session = f"GNC-{app_code.upper()}-{uuid.uuid4().hex[:12].upper()}"
 
-        # 2. Enregistrement en BDD Supabase (Table Sessions_Portail)
+        # 3. Enregistrement en BDD Supabase (Table Sessions_Portail)
         payload_session = {
             "token": token_session,
             "user_id": user_id_num,
@@ -92,19 +95,32 @@ def rediriger_vers_application(app_code: str, app_nom: str, url_base: str):
         }
         supabase.table("Sessions_Portail").insert(payload_session).execute()
 
-        # 3. Construction de l'URL finale avec le paramètre session_token
-        url_securisee = f"{url_base}?session_token={token_session}"
+        # 4. Construction de l'URL sécurisée
+        url_securisee = f"{url_clean}/?session_token={token_session}"
 
-        # 4. Feedback utilisateur & Redirection automatique
-        st.success(
-            f"🔄 **Jeton de sécurité généré !** Redirection vers **{app_nom}**..."
-        )
+        # 5. Affichage d'un bouton de redirection HTML propre sans boucle JS !
+        st.success(f"🔑 Jeton de sécurité généré pour **{app_nom}** !")
+
         st.markdown(
             f"""
-            <meta http-equiv="refresh" content="0;url={url_securisee}">
-            <script type="text/javascript">
-                window.location.href = "{url_securisee}";
-            </script>
+            <div style="margin-top: 15px; margin-bottom: 15px;">
+                <a href="{url_securisee}" target="_blank" style="text-decoration: none;">
+                    <button style="
+                        background-color: #198754;
+                        color: white;
+                        border: none;
+                        padding: 12px 24px;
+                        font-size: 16px;
+                        font-weight: bold;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        width: 100%;
+                        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                    ">
+                        🚀 Cliquez ici pour ouvrir {app_nom} en toute sécurité ↗️
+                    </button>
+                </a>
+            </div>
             """,
             unsafe_allow_html=True,
         )
@@ -114,7 +130,6 @@ def rediriger_vers_application(app_code: str, app_nom: str, url_base: str):
             f"❌ Erreur lors du lancement sécurisé de l'application {app_nom} :"
             f" {err}"
         )
-
 
 with st.sidebar:
     st.divider()
