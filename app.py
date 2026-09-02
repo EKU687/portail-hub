@@ -1,9 +1,10 @@
 # =====================================================================
 # APPLICATION : PORTAIL CENTRAL HUB (portail-gnc)
 # Inclus : Catalogue dynamique, Matrice de droits granulaire,
-#          Gestion Utilisateurs (avec Email, Rôles ORBIS / Portail & Site de travail),
+#          Gestion Utilisateurs (avec Email, Rôles ORBIS / Portail, Site & YubiKey),
 #          Chiffrement / Modification de MDP autonome,
 #          Redirection Sécurisée par Jeton Inter-Applications (Sessions_Portail),
+#          Authentification Hybride (Mot de passe & YubiKey/FIDO2),
 #          et REFERO (Gestion des référentiels MDM avec liaison Site/Direction).
 # =====================================================================
 import uuid
@@ -23,10 +24,80 @@ st.set_page_config(
 )
 
 # =====================================================================
-# 2. AUTHENTIFICATION
+# 2. AUTHENTIFICATION HYBRIDE (MOT DE PASSE OU YUBIKEY)
 # =====================================================================
 if not auth.est_connecte():
-    ui.afficher_ecran_login("Portail Central HUB", "🏛️")
+    col_centered = st.columns([1, 2, 1])[1]
+    with col_centered:
+        st.markdown(
+            "<h2 style='text-align: center;'>🏛️ Portail Central HUB – GNC</h2>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align: center; color: #6c757d;'>Choisissez votre"
+            " mode d'authentification institutionnel</p>",
+            unsafe_allow_html=True,
+        )
+
+        tab_pass, tab_yubi = st.tabs([
+            "🔑 Connexion Mot de Passe",
+            "🛡️ Connexion YubiKey (Super Admin)",
+        ])
+
+        # -----------------------------------------------------------------
+        # OPTION 1 : LOGIN CLASSIQUE (MOT DE PASSE)
+        # -----------------------------------------------------------------
+        with tab_pass:
+            with st.form("form_login_pass"):
+                f_login = st.text_input("Identifiant / Login").lower().strip()
+                f_mdp = st.text_input("Mot de Passe", type="password")
+                btn_login_pass = st.form_submit_button(
+                    "🔑 Se Connecter", use_container_width=True, type="primary"
+                )
+
+            if btn_login_pass:
+                succes, msg = auth.connecter(f_login, f_mdp)
+                if succes:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+        # -----------------------------------------------------------------
+        # OPTION 2 : LOGIN CLÉ PHYSIQUE YUBIKEY (PASSKEY / OTP)
+        # -----------------------------------------------------------------
+        with tab_yubi:
+            st.caption(
+                "Insérez votre YubiKey dans un port USB et pressez le bouton"
+                " tactile."
+            )
+            with st.form("form_login_yubi", clear_on_submit=True):
+                f_login_yubi = (
+                    st.text_input("Identifiant Super Admin / Agent")
+                    .lower()
+                    .strip()
+                )
+                f_yubi_code = st.text_input(
+                    "🔑 Pressez votre YubiKey ici",
+                    type="password",
+                    help="Placez votre curseur dans ce champ et touchez le capteur de la YubiKey.",
+                )
+                btn_login_yubi = st.form_submit_button(
+                    "🛡️ Valider par YubiKey",
+                    use_container_width=True,
+                    type="primary",
+                )
+
+            if btn_login_yubi:
+                succes, msg = auth.connecter_par_yubikey(
+                    f_login_yubi, f_yubi_code
+                )
+                if succes:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
+
     st.stop()
 
 ui.afficher_sidebar_standard()
@@ -71,7 +142,7 @@ def obtenir_sites_actifs_liste() -> list[str]:
 user = auth.get_user_info()
 user_login = str(user.get("login", "")).lower().strip()
 user_role = str(user.get("role", "")).upper().strip()
-user_id_num = user.get("id")  # ID numérique BIGINT de Utilisateurs
+user_id_num = user.get("id")  # ID numérique BIGINT de Utilisateur
 
 # Définition des privilèges Administrateur
 est_admin = (user_role == "ADMIN") or (user_login in ["admin", "eric.kuter"])
@@ -130,6 +201,7 @@ def rediriger_vers_application(app_code: str, app_nom: str, url_base: str):
             f"❌ Erreur lors du lancement sécurisé de l'application {app_nom} :"
             f" {err}"
         )
+
 
 with st.sidebar:
     st.divider()
@@ -513,7 +585,7 @@ if est_admin:
             st.error(f"Erreur lors de la gestion des habilitations : {e}")
 
     # =====================================================================
-    # --- ONGLET 4 : COMPTES UTILISATEURS (ROLES ORBIS & SITE DE TRAVAIL) ---
+    # --- ONGLET 4 : COMPTES UTILISATEURS (ROLES, SITES & ENRÔLEMENT YUBIKEY) ---
     # =====================================================================
     with tab_users:
         st.subheader(
@@ -521,8 +593,8 @@ if est_admin:
         )
         st.caption(
             "Création et gestion des comptes utilisateurs avec attribution des"
-            " services REFERO, des rôles applicatifs (Portail & ORBIS) et du"
-            " site de travail."
+            " services REFERO, des rôles applicatifs, du site de travail et"
+            " enrôlement des clés physiques YubiKey."
         )
 
         sites_disponibles = obtenir_sites_actifs_liste()
@@ -614,6 +686,31 @@ if est_admin:
                     ),
                 )
 
+                # 🛡️ SECTION ENRÔLEMENT YUBIKEY
+                st.markdown("---")
+                st.markdown("##### 🛡️ Habilitation & Enrôlement YubiKey")
+                col_y1, col_y2 = st.columns([2, 1])
+
+                f_yubikey_public_id = (
+                    col_y1.text_input(
+                        "ID Public YubiKey (Device ID)",
+                        placeholder="Insérez et pressez la YubiKey (12 premiers caractères)",
+                        help="Saisissez ou touchez la YubiKey. Les 12 premiers caractères identifient la clé physique.",
+                    )
+                    .lower()
+                    .strip()
+                )
+
+                # Extraction automatique des 12 premiers caractères si un OTP complet est collé
+                if f_yubikey_public_id and len(f_yubikey_public_id) >= 12:
+                    f_yubikey_public_id = f_yubikey_public_id[:12]
+
+                f_yubikey_mandatory = col_y2.checkbox(
+                    "Connexion YubiKey Obligatoire",
+                    value=(f_role == "ADMIN"),
+                    help="Si coché, l'utilisateur NE POURRA PAS se connecter par mot de passe.",
+                )
+
                 btn_valider_compte = st.form_submit_button(
                     "💾 Enregistrer le Compte",
                     type="primary",
@@ -659,6 +756,10 @@ if est_admin:
                             "role": f_role,
                             "service": code_service_clean,
                             "site_defaut": f_site_defaut,
+                            "yubikey_public_id": f_yubikey_public_id
+                            if f_yubikey_public_id
+                            else None,
+                            "yubikey_mandatory": f_yubikey_mandatory,
                         }
 
                         if res_exist.data:
@@ -667,8 +768,9 @@ if est_admin:
                             ).eq("login", f_login).execute()
                             st.success(
                                 f"✅ Compte `{f_login}` mis à jour avec le rôle"
-                                f" **{f_role}**, l'email **{f_email}** et le"
-                                f" site **{f_site_defaut}** !"
+                                f" **{f_role}**, l'email **{f_email}**, le site"
+                                f" **{f_site_defaut}** et la YubiKey"
+                                f" **{f_yubikey_public_id or 'Aucune'}** !"
                             )
                         else:
                             supabase.table("Utilisateur").insert(
@@ -714,6 +816,8 @@ if est_admin:
                             "role",
                             "service",
                             "site_defaut",
+                            "yubikey_public_id",
+                            "yubikey_mandatory",
                         ],
                         column_config={
                             "login": st.column_config.TextColumn(
@@ -737,6 +841,12 @@ if est_admin:
                                 "Site de travail (ORBIS)",
                                 options=sites_disponibles,
                                 required=True,
+                            ),
+                            "yubikey_public_id": st.column_config.TextColumn(
+                                "ID YubiKey (12 car.)"
+                            ),
+                            "yubikey_mandatory": st.column_config.CheckboxColumn(
+                                "YubiKey Obligatoire", default=False
                             ),
                         },
                     )
