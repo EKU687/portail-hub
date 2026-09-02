@@ -24,80 +24,10 @@ st.set_page_config(
 )
 
 # =====================================================================
-# 2. AUTHENTIFICATION HYBRIDE (MOT DE PASSE OU YUBIKEY)
+# 2. AUTHENTIFICATION (DÉLÉGUÉE AU SDK SÉCURISÉ)
 # =====================================================================
 if not auth.est_connecte():
-    col_centered = st.columns([1, 2, 1])[1]
-    with col_centered:
-        st.markdown(
-            "<h2 style='text-align: center;'>🏛️ Portail Central HUB – GNC</h2>",
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            "<p style='text-align: center; color: #6c757d;'>Choisissez votre"
-            " mode d'authentification institutionnel</p>",
-            unsafe_allow_html=True,
-        )
-
-        tab_pass, tab_yubi = st.tabs([
-            "🔑 Connexion Mot de Passe",
-            "🛡️ Connexion YubiKey (Super Admin)",
-        ])
-
-        # -----------------------------------------------------------------
-        # OPTION 1 : LOGIN CLASSIQUE (MOT DE PASSE)
-        # -----------------------------------------------------------------
-        with tab_pass:
-            with st.form("form_login_pass"):
-                f_login = st.text_input("Identifiant / Login").lower().strip()
-                f_mdp = st.text_input("Mot de Passe", type="password")
-                btn_login_pass = st.form_submit_button(
-                    "🔑 Se Connecter", use_container_width=True, type="primary"
-                )
-
-            if btn_login_pass:
-                succes, msg = auth.connecter(f_login, f_mdp)
-                if succes:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
-
-        # -----------------------------------------------------------------
-        # OPTION 2 : LOGIN CLÉ PHYSIQUE YUBIKEY (PASSKEY / OTP)
-        # -----------------------------------------------------------------
-        with tab_yubi:
-            st.caption(
-                "Insérez votre YubiKey dans un port USB et pressez le bouton"
-                " tactile."
-            )
-            with st.form("form_login_yubi", clear_on_submit=True):
-                f_login_yubi = (
-                    st.text_input("Identifiant Super Admin / Agent")
-                    .lower()
-                    .strip()
-                )
-                f_yubi_code = st.text_input(
-                    "🔑 Pressez votre YubiKey ici",
-                    type="password",
-                    help="Placez votre curseur dans ce champ et touchez le capteur de la YubiKey.",
-                )
-                btn_login_yubi = st.form_submit_button(
-                    "🛡️ Valider par YubiKey",
-                    use_container_width=True,
-                    type="primary",
-                )
-
-            if btn_login_yubi:
-                succes, msg = auth.connecter_par_yubikey(
-                    f_login_yubi, f_yubi_code
-                )
-                if succes:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
-
+    ui.afficher_ecran_login(nom_application="Portail Central HUB", icone="🏛️")
     st.stop()
 
 ui.afficher_sidebar_standard()
@@ -107,12 +37,12 @@ ui.afficher_sidebar_standard()
 # =====================================================================
 # Liste officielle des rôles partagés entre Portail HUB et ORBIS
 ROLES_PORTAIL_ET_ORBIS = [
-    "AGENT_SECU",  # Agent de Garde / Rondier (ORBIS)
-    "HABI_ORBIS",  # Agent Habilité / Chef de Poste (ORBIS)
-    "CHARGE_SURETE",  # Chargé de Sûreté
-    "USER",  # Utilisateur standard Portail
-    "ADMIN",  # Administrateur Général
-    "IMPRIMEUR",  # Rôle spécifique badges / impression
+    "AGENT_SECU",    # Agent de Garde / Rondier (ORBIS)
+    "HABI_ORBIS",    # Agent Habilité / Chef de Poste (ORBIS)
+    "CHARGE_SURETE", # Chargé de Sûreté
+    "USER",          # Utilisateur standard Portail
+    "ADMIN",         # Administrateur Général
+    "IMPRIMEUR",     # Rôle spécifique badges / impression
 ]
 
 
